@@ -11,12 +11,11 @@ def conectar():
             database='dbtaller'
         )
         if conexion.is_connected():
-            print("Conexión exitosa a MySQL")
+            print("\nConexión exitosa a MySQL")
         return conexion
     except Error as e:
-        print("Error al conectar a MySQL", e)
+        print(f"Error al conectar a MySQL: {e}")
         return None
-
 
 def crear_tabla_lineainv(cursor):
     cursor.execute("""
@@ -25,33 +24,52 @@ def crear_tabla_lineainv(cursor):
             nombre VARCHAR(250) NOT NULL
         )
     """)
-    print("Tabla lineainv creada correctamente.")
+    print("Tabla lineainv verificada correctamente.")
 
-
-def insertar_lineainv(cursor, clave, nombre):
+def insertar_lineainv(cursor, conexion):
+    clave = input("\nIngrese la clave de la Línea de Investigación: ")
+    nombre = input("Ingrese el nombre de la Línea de Investigación: ")
     try:
         cursor.execute("INSERT INTO lineainv (clavein, nombre) VALUES (%s, %s)", (clave, nombre))
-        print("Registro insertado correctamente.")
+        conexion.commit()
+        print(f"Línea de investigación '{nombre}' insertada correctamente.")
     except Error as e:
-        print(f"Error al insertar registro: {e}")
-
+        print(f"Error al insertar línea de investigación: {e}")
 
 def leer_lineainv(cursor):
     cursor.execute("SELECT * FROM lineainv")
-    print("\nLista de Líneas de Investigación:")
-    for fila in cursor.fetchall():
-        print(f"Clave: {fila[0]}, Nombre: {fila[1]}")
+    lineas = cursor.fetchall()
+    if lineas:
+        print("\nLista de Líneas de Investigación:")
+        for linea in lineas:
+            print(f"Clave: {linea[0]}, Nombre: {linea[1]}")
+    else:
+        print("No hay líneas de investigación registradas.")
 
+def actualizar_lineainv(cursor, conexion):
+    clave = input("\nIngrese la clave de la Línea de Investigación a actualizar: ")
+    nuevo_nombre = input("Ingrese el nuevo nombre: ")
+    try:
+        cursor.execute("UPDATE lineainv SET nombre = %s WHERE clavein = %s", (nuevo_nombre, clave))
+        conexion.commit()
+        if cursor.rowcount > 0:
+            print(f"Línea con clave '{clave}' actualizada a '{nuevo_nombre}'.")
+        else:
+            print("No se encontró la línea de investigación a actualizar.")
+    except Error as e:
+        print(f"Error al actualizar línea de investigación: {e}")
 
-def actualizar_lineainv(cursor, clave, nuevo_nombre):
-    cursor.execute("UPDATE lineainv SET nombre = %s WHERE clavein = %s", (nuevo_nombre, clave))
-    print("Registro actualizado correctamente.")
-
-
-def eliminar_lineainv(cursor, clave):
-    cursor.execute("DELETE FROM lineainv WHERE clavein = %s", (clave,))
-    print("Registro eliminado correctamente.")
-
+def eliminar_lineainv(cursor, conexion):
+    clave = input("\nIngrese la clave de la Línea de Investigación a eliminar: ")
+    try:
+        cursor.execute("DELETE FROM lineainv WHERE clavein = %s", (clave,))
+        conexion.commit()
+        if cursor.rowcount > 0:
+            print(f"Línea con clave '{clave}' eliminada correctamente.")
+        else:
+            print("No se encontró la línea de investigación a eliminar.")
+    except Error as e:
+        print(f"Error al eliminar línea de investigación: {e}")
 
 def main():
     conexion = conectar()
@@ -59,25 +77,34 @@ def main():
         cursor = conexion.cursor()
         crear_tabla_lineainv(cursor)
 
-        try:
-            insertar_lineainv(cursor, 'INV001', 'Inteligencia Artificial')
-            conexion.commit()
-        except:
-            print("El registro con clave 'INV001' ya existe.")
+        while True:
+            print("\n--- MENÚ CRUD: LÍNEAS DE INVESTIGACIÓN ---")
+            print("1. Insertar la Línea de Investigación")
+            print("2. Mostrar la Líneas de Investigación")
+            print("3. Actualizar la Línea de Investigación")
+            print("4. Eliminar la Línea de Investigación")
+            print("5. Salir")
 
-        leer_lineainv(cursor)
+            opcion = input("Seleccione una opción: ")
 
-        actualizar_lineainv(cursor, 'INV001', 'Machine Learning')
-        conexion.commit()
-        leer_lineainv(cursor)
-
-        eliminar_lineainv(cursor, 'INV001')
-        conexion.commit()
-        leer_lineainv(cursor)
+            if opcion == '1':
+                insertar_lineainv(cursor, conexion)
+            elif opcion == '2':
+                leer_lineainv(cursor)
+            elif opcion == '3':
+                actualizar_lineainv(cursor, conexion)
+            elif opcion == '4':
+                eliminar_lineainv(cursor, conexion)
+            elif opcion == '5':
+                print("Saliendo del programa...")
+                break
+            else:
+                print("Opción no válida. Intente de nuevo.")
 
         cursor.close()
         conexion.close()
-
+        print("Conexión cerrada.")
 
 if __name__ == "__main__":
     main()
+
