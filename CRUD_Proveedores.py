@@ -1,329 +1,365 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import mysql.connector
+from mysql.connector import errorcode
 
 
 class ProveedoresApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Proveedores")
-        self.root.geometry("1000x600")
+    def __init__(self, parent, main_root):
+        self.parent = parent
+        self.main_root = main_root
+        self.root = parent
         self.root.configure(bg="#5bfcfe")
 
         # Variables de estado
-        self.modo_edicion = False
         self.proveedor_seleccionado = None
         self.clave_original = None
 
         # Conexión a MySQL
-        self.conexion = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="mysql",
-            database="dbtiendaletty"
-        )
-        self.cursor = self.conexion.cursor()
+        self.conectar_db()
 
-        self.crear_interfaz()
-        self.crear_tabla_proveedores()
+        # Configuración de la interfaz
+        self.configurar_interfaz()
+        self.crear_tablas()
         self.mostrar_proveedores()
 
-    def crear_tabla_proveedores(self):
+    def conectar_db(self):
+        """Establece la conexión con la base de datos"""
         try:
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS proveedores (
-                    clave CHAR(12) PRIMARY KEY,
-                    numTelProv CHAR(10),
-                    empresa VARCHAR(30)
-                    )
-            """)
-            self.conexion.commit()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear la tabla: {str(e)}")
+            self.conexion = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="mysql",
+                database="dbtiendaletty"
+            )
+            self.cursor = self.conexion.cursor(dictionary=True)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"Error al conectar a la base de datos: {err}")
+            raise
 
-    def crear_interfaz(self):
-        # Configuración de grid
-        self.root.grid_columnconfigure(0, weight=0)
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_columnconfigure(2, weight=3)
-
-        # Configurar filas
-        for i in range(6):
-            self.root.grid_rowconfigure(i, weight=0)
-        self.root.grid_rowconfigure(6, weight=1)
+    def configurar_interfaz(self):
+        """Configura los elementos de la interfaz gráfica"""
+        # Configuración del grid
+        for i in range(3):
+            self.root.grid_columnconfigure(i, weight=1 if i > 0 else 0)
+        for i in range(7):
+            self.root.grid_rowconfigure(i, weight=1 if i == 6 else 0)
 
         # Título
-        tk.Label(self.root, text="Proveedores", font=("Impact", 20, "bold"), bg="#5bfcfe"
-                 ).grid(row=0, column=0, columnspan=3, pady=20, sticky="n")
+        tk.Label(self.root, text="Proveedores", font=("Impact", 20, "bold"),
+                 bg="#5bfcfe").grid(row=0, column=0, columnspan=3, pady=20, sticky="n")
 
         # Campos de entrada
         self.campos = {}
         campos_config = [
-            ("Clave:", "clave", ""),
-            ("Teléfono:", "numTelProv", ""),
-            ("Empresa:", "empresa", "")
+            ("Clave:", "claveProv", "", 12),
+            ("Teléfono:", "numTelProv", "", 10),
+            ("Empresa:", "empresa", "", 30),
+            ("Costos:", "costos", "", 10),
+            ("Cantidad comprada:", "cantidadEntregada", "", 10)
         ]
 
-        for i, (texto, nombre, show_char) in enumerate(campos_config, start=1):
+        for i, (texto, nombre, show_char, maxlength) in enumerate(campos_config, 1):
             tk.Label(self.root, text=texto, font=("Arial", 14), bg="#5bfcfe"
                      ).grid(row=i, column=0, padx=10, pady=10, sticky="w")
 
-            entry = tk.Entry(self.root, font=("Arial", 14), bg="#e6ffff", show=show_char)
+            entry = tk.Entry(self.root, font=("Arial", 14), bg="#e6ffff",
+                             show=show_char, validate="key")
+            if maxlength:
+                entry['validatecommand'] = (entry.register(self.validar_longitud), '%P', maxlength)
             entry.grid(row=i, column=2, padx=(0, 20), pady=10, sticky="ew")
             self.campos[nombre] = entry
 
-        # Frame para botones principales
-        frame_botones_principales = tk.Frame(self.root, bg="#5bfcfe")
-        frame_botones_principales.grid(row=5, column=0, columnspan=3, pady=20)
+        # Botones principales
+        self.crear_botones()
 
-        # Botones CRUD principales
-        self.btn_crear = tk.Button(frame_botones_principales, text="Crear", bg="#A2E4B8",
-                                   font=("Arial", 12), command=self.crear_proveedor)
-        self.btn_crear.grid(row=0, column=0, padx=10, ipadx=10, ipady=5)
+        # Tabla de proveedores
+        self.configurar_tabla()
 
-        self.btn_leer = tk.Button(frame_botones_principales, text="Leer", bg="#9AD0F5",
-                                  font=("Arial", 12), command=self.mostrar_detalles_proveedor)
-        self.btn_leer.grid(row=0, column=1, padx=10, ipadx=10, ipady=5)
+    def validar_longitud(self, texto, maxlength):
+        """Valida que el texto no exceda la longitud máxima"""
+        return len(texto) <= int(maxlength)
 
-        self.btn_editar = tk.Button(frame_botones_principales, text="Editar", bg="#FFE08A",
-                                    font=("Arial", 12), command=self.preparar_edicion)
-        self.btn_editar.grid(row=0, column=2, padx=10, ipadx=10, ipady=5)
+    def crear_botones(self):
+        """Crea los botones de la interfaz"""
+        frame_botones = tk.Frame(self.root, bg="#5bfcfe")
+        frame_botones.grid(row=7, column=0, columnspan=3, pady=20)
 
-        self.btn_borrar = tk.Button(frame_botones_principales, text="Borrar", bg="#F4A4A4",
-                                    font=("Arial", 12), command=self.borrar_proveedor)
-        self.btn_borrar.grid(row=0, column=3, padx=10, ipadx=10, ipady=5)
+        botones = [
+            ("Añadir", "#A2E4B8", self.crear_proveedor),
+            ("Editar", "#FFE08A", self.editar_proveedor),
+            ("Borrar", "#F4A4A4", self.borrar_proveedor),
+            ("Limpiar", "#D3D3D3", self.limpiar_campos)
+        ]
 
-        # Frame para botones secundarios (confirmar/cancelar/volver)
-        self.frame_botones_secundarios = tk.Frame(self.root, bg="#5bfcfe")
-        self.frame_botones_secundarios.grid(row=7, column=0, columnspan=3, pady=10)
-        self.frame_botones_secundarios.grid_remove()  # Ocultar inicialmente
+        for i, (texto, color, comando) in enumerate(botones):
+            tk.Button(frame_botones, text=texto, bg=color, font=("Arial", 12),
+                      command=comando).grid(row=0, column=i, padx=10, ipadx=10, ipady=5)
 
-        self.btn_confirmar = tk.Button(self.frame_botones_secundarios, text="Confirmar", bg="#A2E4B8",
-                                       font=("Arial", 12), command=self.confirmar_actualizacion)
-        self.btn_confirmar.grid(row=0, column=0, padx=10, ipadx=10, ipady=5)
-
-        self.btn_cancelar = tk.Button(self.frame_botones_secundarios, text="Cancelar", bg="#F4A4A4",
-                                      font=("Arial", 12), command=self.cancelar_edicion)
-        self.btn_cancelar.grid(row=0, column=1, padx=10, ipadx=10, ipady=5)
-
-        self.btn_volver = tk.Button(self.frame_botones_secundarios, text="Volver a lista", bg="#9AD0F5",
-                                    font=("Arial", 12), command=self.volver_a_lista)
-        self.btn_volver.grid(row=0, column=2, padx=10, ipadx=10, ipady=5)
-
-        # Treeview
+    def configurar_tabla(self):
+        """Configura la tabla de proveedores"""
         frame_tabla = tk.Frame(self.root)
         frame_tabla.grid(row=6, column=0, columnspan=3, sticky="nsew", padx=20, pady=(0, 20))
 
-        self.tabla = ttk.Treeview(frame_tabla, columns=("Clave", ), show="headings")
-        self.tabla.heading("Clave", text="Clave")
+        columnas = [
+            ("Clave", 90),
+            ("Teléfono", 100),
+            ("Empresa", 150),
+            ("Costos", 100),
+            ("Cantidad", 120)
+        ]
+
+        self.tabla = ttk.Treeview(frame_tabla, columns=[col[0] for col in columnas],
+                                  show="headings", height=12)
+
+        for col, width in columnas:
+            self.tabla.heading(col, text=col)
+            self.tabla.column(col, width=width, anchor=tk.CENTER if col in ["Costos", "Cantidad"] else tk.W)
 
         scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=self.tabla.yview)
         self.tabla.configure(yscrollcommand=scrollbar.set)
+        self.tabla.bind("<<TreeviewSelect>>", self.seleccionar_proveedor)
 
         self.tabla.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+    def crear_tablas(self):
+        """Crea las tablas necesarias en la base de datos"""
+        tablas = {
+            "proveedores": """
+                CREATE TABLE IF NOT EXISTS proveedores (
+                    claveProv CHAR(12) PRIMARY KEY,
+                    numTelProv CHAR(10),
+                    empresa VARCHAR(30)
+                )
+            """,
+            "detalles": """
+                CREATE TABLE IF NOT EXISTS detalles (
+                    claveProv CHAR(12) PRIMARY KEY,
+                    costos DECIMAL(10,2) DEFAULT 0,
+                    cantidadEntregada INT DEFAULT 0,
+                    FOREIGN KEY (claveProv) REFERENCES proveedores(claveProv)
+                )
+            """
+        }
+
+        for nombre, sql in tablas.items():
+            try:
+                self.cursor.execute(sql)
+                self.conexion.commit()
+            except mysql.connector.Error as err:
+                messagebox.showerror("Error", f"No se pudo crear la tabla {nombre}: {err}")
+
     def mostrar_proveedores(self):
         """Muestra todos los proveedores en la tabla"""
-        # Limpiar tabla
-        for item in self.tabla.get_children():
-            self.tabla.delete(item)
+        self.tabla.delete(*self.tabla.get_children())
 
         try:
-            self.cursor.execute("SELECT clave FROM proveedores ORDER BY empresa")
-            proveedores = self.cursor.fetchall()
+            self.cursor.execute("""
+                SELECT p.claveProv, p.numTelProv, p.empresa, 
+                       COALESCE(d.costos, 0) as costos, 
+                       COALESCE(d.cantidadEntregada, 0) as cantidadEntregada
+                FROM proveedores p
+                LEFT JOIN detalles d ON p.claveProv = d.claveProv
+                ORDER BY p.empresa
+            """)
 
-            for proveedor in proveedores:
-                self.tabla.insert("", "end", values=proveedor)
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar los proveedores: {str(e)}")
+            for proveedor in self.cursor.fetchall():
+                self.tabla.insert("", "end", values=(
+                    proveedor['claveProv'],
+                    proveedor['numTelProv'],
+                    proveedor['empresa'],
+                    f"${proveedor['costos']:.2f}",
+                    proveedor['cantidadEntregada']
+                ))
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"No se pudieron cargar los proveedores: {err}")
+
+    def obtener_datos(self):
+        """Obtiene los datos de los campos de entrada"""
+        return {clave: entry.get().strip() for clave, entry in self.campos.items()}
+
+    def validar_datos(self, datos, edicion=False):
+        """Valida los datos del formulario"""
+        errores = []
+
+        # Validar campos obligatorios
+        if not datos['claveProv']:
+            errores.append("La clave es obligatoria")
+        if not datos['empresa']:
+            errores.append("La empresa es obligatoria")
+
+        # Validar formatos
+        if datos['numTelProv'] and (not datos['numTelProv'].isdigit() or len(datos['numTelProv']) != 10):
+            errores.append("Teléfono debe tener 10 dígitos")
+
+        try:
+            float(datos['costos'] or 0)
+        except ValueError:
+            errores.append("Costos debe ser un número")
+
+        try:
+            int(datos['cantidadEntregada'] or 0)
+        except ValueError:
+            errores.append("Cantidad debe ser un número entero")
+
+        return errores
 
     def crear_proveedor(self):
         """Crea un nuevo proveedor"""
-        datos = {
-            'clave': self.campos['clave'].get(),
-            'numTelProv': self.campos['numTelProv'].get(),
-            'empresa': self.campos['empresa'].get()
-        }
+        datos = self.obtener_datos()
+        errores = self.validar_datos(datos)
 
-        # Validación básica
-        if not datos['clave']:
-            messagebox.showwarning("Advertencia", "La clave es un campo obligatorio")
+        if errores:
+            messagebox.showwarning("Validación", "\n".join(errores))
             return
 
         try:
+            costos = float(datos['costos'] or 0)
+            cantidad = int(datos['cantidadEntregada'] or 0)
+
+            self.cursor.execute("START TRANSACTION")
+
+            # Insertar proveedor
             self.cursor.execute("""
-                INSERT INTO proveedores (clave, numTelProv, empresa)
+                INSERT INTO proveedores (claveProv, numTelProv, empresa)
                 VALUES (%s, %s, %s)
-            """, (datos['clave'], datos['numTelProv'], datos['empresa']))
+            """, (datos['claveProv'], datos['numTelProv'] or None, datos['empresa']))
+
+            # Insertar detalles
+            self.cursor.execute("""
+                INSERT INTO detalles (claveProv, costos, cantidadEntregada)
+                VALUES (%s, %s, %s)
+            """, (datos['claveProv'], costos, cantidad))
+
             self.conexion.commit()
             messagebox.showinfo("Éxito", "Proveedor creado correctamente")
-            self.volver_a_lista()
+            self.mostrar_proveedores()
             self.limpiar_campos()
-        except mysql.connector.IntegrityError:
-            messagebox.showerror("Error", "La clave ya existe")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear el proveedor: {str(e)}")
 
-    def mostrar_detalles_proveedor(self):
-        """Muestra los detalles del proveedor seleccionado"""
-        seleccion = self.tabla.selection()
-        if not seleccion:
-            messagebox.showwarning("Advertencia", "Seleccione un proveedor primero")
-            return
-
-        clave = self.tabla.item(seleccion[0])['values'][0]
-
-        try:
-            self.cursor.execute("SELECT * FROM proveedores WHERE clave = %s", (clave,))
-            proveedor = self.cursor.fetchone()
-
-            if proveedor:
-                # Configurar columnas para mostrar detalles
-                self.tabla["columns"] = ("Clave", "Teléfono", "Empresa")
-
-                # Configurar encabezados
-                columnas = [
-                    ("Clave", 150),
-                    ("Teléfono", 150),
-                    ("Empresa", 250)
-                ]
-
-                for col, width in columnas:
-                    self.tabla.heading(col, text=col)
-                    self.tabla.column(col, width=width)
-
-                # Limpiar tabla y mostrar solo este proveedor
-                for item in self.tabla.get_children():
-                    self.tabla.delete(item)
-
-                self.tabla.insert("", "end", values=proveedor)
-                self.proveedor_seleccionado = proveedor
-
-                # Mostrar botón "Volver a lista"
-                self.frame_botones_secundarios.grid()
-                self.btn_volver.config(state=tk.NORMAL)
-                self.btn_confirmar.config(state=tk.DISABLED)
-                self.btn_cancelar.config(state=tk.DISABLED)
+        except mysql.connector.IntegrityError as err:
+            self.conexion.rollback()
+            if err.errno == errorcode.ER_DUP_ENTRY:
+                messagebox.showerror("Error", "La clave ya existe")
             else:
-                messagebox.showinfo("Información", "No se encontraron detalles para este proveedor")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar los detalles: {str(e)}")
+                messagebox.showerror("Error", f"Error de integridad: {err}")
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"No se pudo crear el proveedor: {err}")
 
-    def preparar_edicion(self):
-        """Prepara la interfaz para editar un proveedor"""
+    def seleccionar_proveedor(self, event):
+        """Selecciona un proveedor de la tabla"""
+        seleccion = self.tabla.focus()
+        if seleccion:
+            item = self.tabla.item(seleccion)
+            self.proveedor_seleccionado = item['values']
+            self.clave_original = item['values'][0]
+
+            # Limpiar y cargar datos en los campos
+            self.limpiar_campos()
+            for campo, valor in zip(self.campos.keys(), item['values']):
+                # Eliminar formato de dinero si es necesario
+                cleaned_val = valor.replace('$', '') if campo == 'costos' else valor
+                self.campos[campo].insert(0, cleaned_val)
+
+    def editar_proveedor(self):
+        """Edita un proveedor existente"""
         if not self.proveedor_seleccionado:
-            messagebox.showwarning("Advertencia", "Primero use 'Leer' en un proveedor")
+            messagebox.showwarning("Error", "Seleccione un proveedor para editar")
             return
 
-        # Cargar datos en los campos
-        self.limpiar_campos()
-        self.campos['clave'].insert(0, self.proveedor_seleccionado[0])
-        self.campos['numTelProv'].insert(0, self.proveedor_seleccionado[1] or "")
-        self.campos['empresa'].insert(0, self.proveedor_seleccionado[2] or "")
+        datos = self.obtener_datos()
+        errores = self.validar_datos(datos, edicion=True)
 
-        # Deshabilitar campo de clave (es la clave primaria)
-        self.campos['clave'].config(state='disabled')
-
-        # Cambiar a modo edición
-        self.modo_edicion = True
-        self.clave_original = self.proveedor_seleccionado[0]
-
-        # Mostrar botones de confirmación
-        self.frame_botones_secundarios.grid()
-        self.btn_confirmar.config(state=tk.NORMAL)
-        self.btn_cancelar.config(state=tk.NORMAL)
-        self.btn_volver.config(state=tk.DISABLED)
-
-        # Deshabilitar botones principales
-        for btn in [self.btn_crear, self.btn_leer, self.btn_editar, self.btn_borrar]:
-            btn.config(state=tk.DISABLED)
-
-    def confirmar_actualizacion(self):
-        """Confirma la actualización del proveedor"""
-        datos = {
-            'clave_original': self.clave_original,
-            'numTelProv': self.campos['numTelProv'].get(),
-            'empresa': self.campos['empresa'].get()
-        }
+        if errores:
+            messagebox.showwarning("Validación", "\n".join(errores))
+            return
 
         try:
-            # Actualizar el proveedor
+            costos = float(datos['costos'] or 0)
+            cantidad = int(datos['cantidadEntregada'] or 0)
+
+            self.cursor.execute("START TRANSACTION")
+
+            # Actualizar proveedor
             self.cursor.execute("""
                 UPDATE proveedores 
-                SET numTelProv = %s, empresa = %s
-                WHERE clave = %s
-            """, (datos['numTelProv'], datos['empresa'], datos['clave_original']))
+                SET numTelProv = %s, 
+                    empresa = %s 
+                WHERE claveProv = %s
+            """, (datos['numTelProv'] or None, datos['empresa'], self.clave_original))
+
+            # Actualizar detalles
+            self.cursor.execute("""
+                UPDATE detalles
+                SET costos = %s,
+                    cantidadEntregada = %s
+                WHERE claveProv = %s
+            """, (costos, cantidad, self.clave_original))
+
+            # Si cambió la clave, actualizarla en ambas tablas
+            if datos['claveProv'] != self.clave_original:
+                self.cursor.execute("""
+                    UPDATE proveedores
+                    SET claveProv = %s
+                    WHERE claveProv = %s
+                """, (datos['claveProv'], self.clave_original))
+
+                self.cursor.execute("""
+                    UPDATE detalles
+                    SET claveProv = %s
+                    WHERE claveProv = %s
+                """, (datos['claveProv'], self.clave_original))
 
             self.conexion.commit()
             messagebox.showinfo("Éxito", "Proveedor actualizado correctamente")
-            self.cancelar_edicion()
-            self.volver_a_lista()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo actualizar el proveedor: {str(e)}")
+            self.mostrar_proveedores()
+            self.limpiar_campos()
+            self.proveedor_seleccionado = None
 
-    def cancelar_edicion(self):
-        """Cancela el modo de edición"""
-        # Limpiar todos los campos, incluyendo la clave (aunque esté deshabilitado)
-        for nombre, campo in self.campos.items():
-            campo.config(state='normal')  # Habilitar temporalmente para limpiar
-            campo.delete(0, tk.END)
-
-        self.modo_edicion = False
-        self.clave_original = None
-
-        # Ocultar botones secundarios
-        self.frame_botones_secundarios.grid_remove()
-
-        # Habilitar botones principales
-        for btn in [self.btn_crear, self.btn_leer, self.btn_editar, self.btn_borrar]:
-            btn.config(state=tk.NORMAL)
-
-    def volver_a_lista(self):
-        self.tabla["columns"] = ("Clave")
-        self.tabla.heading("Clave", text="Clave")
-        self.tabla.column("Clave", width=200)
-        """Vuelve a mostrar la lista de proveedores"""
-        self.mostrar_proveedores()
-        self.proveedor_seleccionado = None
-        self.frame_botones_secundarios.grid_remove()
-
-        # Habilitar botones principales
-        for btn in [self.btn_crear, self.btn_leer, self.btn_editar, self.btn_borrar]:
-            btn.config(state=tk.NORMAL)
+        except mysql.connector.IntegrityError as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"Error de integridad: {err}")
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"Error al actualizar: {err}")
 
     def borrar_proveedor(self):
-        """Borra un proveedor existente"""
+        """Elimina un proveedor"""
         if not self.proveedor_seleccionado:
-            messagebox.showwarning("Advertencia", "Primero use 'Leer' en un proveedor")
+            messagebox.showwarning("Error", "Seleccione un proveedor para borrar")
             return
 
-        if messagebox.askyesno("Confirmar", "¿Está seguro de borrar este proveedor?"):
-            try:
-                self.cursor.execute("DELETE FROM proveedores WHERE clave = %s", (self.proveedor_seleccionado[0],))
-                self.conexion.commit()
-                messagebox.showinfo("Éxito", "Proveedor borrado correctamente")
-                self.volver_a_lista()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo borrar el proveedor: {str(e)}")
+        if not messagebox.askyesno("Confirmar", "¿Borrar este proveedor y sus detalles?"):
+            return
+
+        try:
+            self.cursor.execute("START TRANSACTION")
+
+            # Borrar detalles primero por la FK
+            self.cursor.execute("DELETE FROM detalles WHERE claveProv = %s", (self.clave_original,))
+            # Luego borrar proveedor
+            self.cursor.execute("DELETE FROM proveedores WHERE claveProv = %s", (self.clave_original,))
+
+            self.conexion.commit()
+            messagebox.showinfo("Éxito", "Proveedor borrado correctamente")
+            self.mostrar_proveedores()
+            self.limpiar_campos()
+            self.proveedor_seleccionado = None
+
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"No se pudo borrar: {err}")
 
     def limpiar_campos(self):
-        """Limpia todos los campos de entrada, incluso los deshabilitados"""
-        for nombre, campo in self.campos.items():
-            estado_actual = campo['state']  # Guardar estado actual
-            campo.config(state='normal')  # Habilitar temporalmente
-            campo.delete(0, tk.END)  # Limpiar contenido
-            campo.config(state=estado_actual)  # Restaurar estado original
+        """Limpia todos los campos de entrada"""
+        for campo in self.campos.values():
+            campo.delete(0, tk.END)
+        self.proveedor_seleccionado = None
 
     def __del__(self):
-        """Cierra la conexión a la base de datos al salir"""
+        """Cierra la conexión a la base de datos"""
         if hasattr(self, 'cursor'):
             self.cursor.close()
-        if hasattr(self, 'conexion'):
+        if hasattr(self, 'conexion') and self.conexion.is_connected():
             self.conexion.close()
-
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = ProveedoresApp(root)
-    root.mainloop()
