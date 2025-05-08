@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import mysql.connector
+from mysql.connector import errorcode
 from datetime import datetime
 
 
@@ -9,45 +10,151 @@ class ArticulosApp:
         self.parent = parent
         self.main_root = main_root
         self.root = parent
-        self.root.configure(bg="#5bfcfe")
+        self.root.configure(bg="#f0f2f5")  # Fondo claro y moderno
 
-        # Variables de estado
-        self.modo_edicion = False
         self.articulo_seleccionado = None
         self.codigo_original = None
+        self.modo_edicion = False
 
-        # Conexión a MySQL
-        self.conexion = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="mysql",
-            database="dbtiendaletty"
-        )
-        self.cursor = self.conexion.cursor()
+        try:
+            self.conexion = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="mysql",
+                database="dbtiendaletty"
+            )
+            self.cursor = self.conexion.cursor(dictionary=True)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error de Conexión", f"No se pudo conectar a la base de datos:\n{err}")
+            return
 
-        self.crear_interfaz()
-        self.crear_tabla_articulos()
-        self.crear_tabla_detalles()
+        self.crear_tablas()
+        self.configurar_interfaz()
         self.mostrar_articulos()
 
-    def crear_tabla_articulos(self):
+    def configurar_interfaz(self):
+        for i in range(3):
+            self.root.grid_columnconfigure(i, weight=1)
+        for i in range(8):
+            self.root.grid_rowconfigure(i, weight=0)
+        self.root.grid_rowconfigure(7, weight=1)
+
+        title_frame = tk.Frame(self.root, bg="#2c3e50", height=80)
+        title_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 20))
+        title_frame.grid_columnconfigure(0, weight=1)
+
+        tk.Label(title_frame, text="Artículos",
+                 font=("Segoe UI", 24, "bold"), bg="#2c3e50", fg="white").grid(row=0, column=0, pady=20)
+
+        form_frame = tk.Frame(self.root, bg="#f0f2f5")
+        form_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=20)
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        self.campos = {}
+        labels = [
+            ("Código Barras (13 dígitos):", "codigoBarras"),
+            ("Nombre:", "nombreArt"),
+            ("Marca:", "marca"),
+            ("Cantidad en almacén:", "cantidadAlmacen"),
+            ("Precio unitario:", "precioUnit"),
+            ("Caducidad (AAAA-MM-DD):", "caducidad"),
+            ("Clave de proveedor:", "claveProv")
+        ]
+        maxlengths = {
+            "codigoBarras": 13,
+            "nombreArt": 80,
+            "marca": 50,
+            "cantidadAlmacen": 10,
+            "precioUnit": 15,
+            "caducidad": 10,
+            "claveProv": 12
+        }
+
+        for idx, (text, key) in enumerate(labels):
+            lbl = tk.Label(form_frame, text=text, font=("Segoe UI", 11), bg="#f0f2f5", anchor="w")
+            lbl.grid(row=idx, column=0, sticky="w", pady=6, padx=(0, 10))
+            entry = tk.Entry(form_frame, font=("Segoe UI", 11), bg="white", relief="groove", bd=2)
+            entry.grid(row=idx, column=1, sticky="ew", pady=6)
+            entry.configure(validate="key",
+                            validatecommand=(entry.register(self.validar_longitud), '%P', maxlengths[key]))
+            self.campos[key] = entry
+
+        button_frame = tk.Frame(self.root, bg="#f0f2f5")
+        button_frame.grid(row=2, column=0, columnspan=3, pady=15)
+
+        botones = [
+            ("Añadir", "#27ae60", self.crear_articulo),
+            ("Editar", "#f39c12", self.editar_articulo),
+            ("Borrar", "#e74c3c", self.borrar_articulo),
+            ("Limpiar", "#95a5a6", self.limpiar_campos)
+        ]
+
+        for i, (text, color, cmd) in enumerate(botones):
+            btn = tk.Button(button_frame, text=text, command=cmd, bg=color, fg="white",
+                            font=("Segoe UI", 11, "bold"), relief="flat", bd=0, padx=15, pady=8,
+                            activebackground=self.aclarar_color(color, 20), activeforeground="white")
+            btn.grid(row=0, column=i, padx=10, ipadx=5)
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=self.aclarar_color(b['bg'], 15)))
+            btn.bind("<Leave>", lambda e, b=btn, c=color: b.config(bg=c))
+
+        table_frame = tk.Frame(self.root, bg="#f0f2f5")
+        table_frame.grid(row=7, column=0, columnspan=3, sticky="nsew", padx=20, pady=(0, 20))
+        table_frame.grid_columnconfigure(0, weight=1)
+        table_frame.grid_rowconfigure(0, weight=1)
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview.Heading", font=("Segoe UI", 11, "bold"),
+                        background="#34495e", foreground="white", padding=5)
+        style.configure("Treeview", font=("Segoe UI", 11), rowheight=28)
+        style.map("Treeview", background=[("selected", "#3498db")])
+
+        self.tabla = ttk.Treeview(table_frame,
+                                  columns=("Código", "Nombre", "Marca", "Cantidad", "Precio", "Caducidad", "Proveedor"),
+                                  show="headings", selectmode="browse")
+        columnas = [
+            ("Código", 130, "center"),
+            ("Nombre", 200, "w"),
+            ("Marca", 120, "center"),
+            ("Cantidad", 80, "center"),
+            ("Precio", 100, "center"),
+            ("Caducidad", 100, "center"),
+            ("Proveedor", 120, "center")
+        ]
+        for col, width, anchor in columnas:
+            self.tabla.heading(col, text=col)
+            self.tabla.column(col, width=width, anchor=anchor)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tabla.yview)
+        self.tabla.configure(yscrollcommand=scrollbar.set)
+        self.tabla.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.tabla.bind("<<TreeviewSelect>>", self.seleccionar_articulo)
+
+    def aclarar_color(self, color_hex, amount=30):
+        try:
+            r = min(255, int(color_hex[1:3], 16) + amount)
+            g = min(255, int(color_hex[3:5], 16) + amount)
+            b = min(255, int(color_hex[5:7], 16) + amount)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            return color_hex
+
+    def validar_longitud(self, texto, maxlength):
+        return len(texto) <= int(maxlength)
+
+    def crear_tablas(self):
         try:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS articulos (
                     codigoBarras CHAR(13) PRIMARY KEY,
-                    nombreArt VARCHAR(80),
+                    nombreArt VARCHAR(80) NOT NULL,
                     marca VARCHAR(50),
                     cantidadAlmacen INT DEFAULT 0,
                     precioUnit DECIMAL(10,2) DEFAULT 0,
                     caducidad DATE NULL
                 )
             """)
-            self.conexion.commit()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear la tabla articulos: {str(e)}")
-
-    def crear_tabla_detalles(self):
-        try:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS detalles (
                     claveProv CHAR(12) NOT NULL,
@@ -60,92 +167,11 @@ class ArticulosApp:
                 )
             """)
             self.conexion.commit()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear la tabla detalles: {str(e)}")
-
-    def crear_interfaz(self):
-        # Configuración de grid
-        self.root.grid_columnconfigure(0, weight=0)
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_columnconfigure(2, weight=3)
-
-        # Configurar filas
-        for i in range(10):
-            self.root.grid_rowconfigure(i, weight=0)
-        self.root.grid_rowconfigure(10, weight=1)
-
-        # Título
-        tk.Label(self.root, text="Artículos", font=("Impact", 20, "bold"), bg="#5bfcfe"
-                 ).grid(row=0, column=0, columnspan=3, pady=20, sticky="n")
-
-        # Campos de entrada
-        self.campos = {}
-        campos_config = [
-            ("Código Barras (13 dígitos):", "codigoBarras", ""),
-            ("Nombre:", "nombreArt", ""),
-            ("Marca:", "marca", ""),
-            ("Cantidad en almacén:", "cantidadAlmacen", ""),
-            ("Precio unitario:", "precioUnit", ""),
-            ("Caducidad (AAAA-MM-DD):", "caducidad", ""),
-            ("Clave de proveedor:", "claveProv", "")
-        ]
-
-        for i, (texto, nombre, _) in enumerate(campos_config, start=1):
-            tk.Label(self.root, text=texto, font=("Arial", 12), bg="#5bfcfe"
-                     ).grid(row=i, column=0, padx=10, pady=5, sticky="w")
-
-            entry = tk.Entry(self.root, font=("Arial", 12), bg="#e6ffff")
-            entry.grid(row=i, column=2, padx=10, pady=5, sticky="ew")
-            self.campos[nombre] = entry
-
-        # Frame para botones principales
-        frame_botones = tk.Frame(self.root, bg="#5bfcfe")
-        frame_botones.grid(row=9, column=0, columnspan=3, pady=10)
-
-        # Botones CRUD
-        botones = [
-            ("Añadir", "#A2E4B8", self.crear_articulo),
-            ("Editar", "#FFE08A", self.editar_articulo),
-            ("Borrar", "#F4A4A4", self.borrar_articulo)
-        ]
-
-        for i, (texto, color, comando) in enumerate(botones):
-            tk.Button(frame_botones, text=texto, bg=color, font=("Arial", 10),
-                      command=comando).grid(row=0, column=i, padx=5, ipadx=5, ipady=3)
-
-        # Treeview
-        frame_tabla = tk.Frame(self.root)
-        frame_tabla.grid(row=10, column=0, columnspan=3, sticky="nsew", padx=20, pady=(0, 20))
-
-        columnas = [
-            ("Código", 120),
-            ("Nombre", 200),
-            ("Marca", 100),
-            ("Cantidad", 80),
-            ("Precio", 80),
-            ("Caducidad", 100),
-            ("Proveedor", 100)
-        ]
-
-        self.tabla = ttk.Treeview(frame_tabla, columns=[col[0] for col in columnas],
-                                  show="headings", height=12)
-
-        for col, width in columnas:
-            self.tabla.heading(col, text=col)
-            self.tabla.column(col, width=width, anchor='center')
-
-        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=self.tabla.yview)
-        self.tabla.configure(yscrollcommand=scrollbar.set)
-
-        self.tabla.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        self.tabla.bind("<<TreeviewSelect>>", self.seleccionar_articulo)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"No se pudieron crear las tablas:\n{err}")
 
     def mostrar_articulos(self):
-        for item in self.tabla.get_children():
-            self.tabla.delete(item)
-
+        self.tabla.delete(*self.tabla.get_children())
         try:
             self.cursor.execute("""
                 SELECT a.codigoBarras, a.nombreArt, a.marca, a.cantidadAlmacen, 
@@ -154,227 +180,201 @@ class ArticulosApp:
                 LEFT JOIN detalles d ON a.codigoBarras = d.codigoBarras
                 ORDER BY a.nombreArt
             """)
-
             for articulo in self.cursor.fetchall():
-                caducidad = articulo[5].strftime("%Y-%m-%d") if articulo[5] else ""
+                caducidad = articulo['caducidad'].strftime("%Y-%m-%d") if articulo['caducidad'] else ""
                 self.tabla.insert("", "end", values=(
-                    articulo[0], articulo[1], articulo[2], articulo[3],
-                    f"${articulo[4]:.2f}", caducidad, articulo[6] or ""
+                    articulo['codigoBarras'],
+                    articulo['nombreArt'],
+                    articulo['marca'],
+                    articulo['cantidadAlmacen'],
+                    f"${articulo['precioUnit']:.2f}",
+                    caducidad,
+                    articulo['claveProv'] or ""
                 ))
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar artículos: {str(e)}")
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"No se pudieron cargar los artículos:\n{err}")
 
     def obtener_datos(self):
-        return {clave: entry.get().strip() for clave, entry in self.campos.items()}
+        return {k: v.get().strip() for k, v in self.campos.items()}
 
     def validar_datos(self, datos):
-        if not datos['codigoBarras'] or not datos['nombreArt']:
-            messagebox.showwarning("Error", "Código y nombre son obligatorios")
-            return False
-
-        if len(datos['codigoBarras']) != 13 or not datos['codigoBarras'].isdigit():
-            messagebox.showerror("Error", "Código debe tener 13 dígitos")
-            return False
-
+        errores = []
+        if not datos['codigoBarras']:
+            errores.append("El código de barras es obligatorio")
+        elif len(datos['codigoBarras']) != 13 or not datos['codigoBarras'].isdigit():
+            errores.append("El código de barras debe tener 13 dígitos")
+        if not datos['nombreArt']:
+            errores.append("El nombre es obligatorio")
         try:
-            datos['cantidadAlmacen'] = int(datos['cantidadAlmacen']) if datos['cantidadAlmacen'] else 0
-            datos['precioUnit'] = float(datos['precioUnit']) if datos['precioUnit'] else 0.0
-
-            if datos['caducidad']:
+            datos['cantidadAlmacen'] = int(datos['cantidadAlmacen'] or 0)
+        except ValueError:
+            errores.append("La cantidad debe ser un número entero")
+        try:
+            datos['precioUnit'] = float(datos['precioUnit'] or 0)
+            if datos['precioUnit'] < 0:
+                errores.append("El precio no puede ser negativo")
+        except ValueError:
+            errores.append("El precio debe ser un número válido")
+        if datos['caducidad']:
+            try:
                 datetime.strptime(datos['caducidad'], "%Y-%m-%d")
-
-            return True
-        except ValueError as e:
-            messagebox.showerror("Error", f"Datos inválidos: {str(e)}")
+            except ValueError:
+                errores.append("Formato de fecha inválido (AAAA-MM-DD)")
+        if errores:
+            messagebox.showwarning("Validación", "\n".join(errores))
             return False
-
-    def crear_articulo(self):
-        datos = self.obtener_datos()
-
-        if not self.validar_datos(datos):
-            return
-
-        try:
-            self.cursor.execute("START TRANSACTION")
-
-            # Insertar artículo
-            self.cursor.execute("""
-                INSERT INTO articulos (codigoBarras, nombreArt, marca, 
-                                      cantidadAlmacen, precioUnit, caducidad)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                datos['codigoBarras'],
-                datos['nombreArt'],
-                datos['marca'],
-                datos['cantidadAlmacen'],
-                datos['precioUnit'],
-                datos['caducidad'] if datos['caducidad'] else None
-            ))
-
-            # Insertar relación con proveedor si existe
-            if datos['claveProv']:
-                self.cursor.execute("""
-                    INSERT INTO detalles (claveProv, codigoBarras)
-                    VALUES (%s, %s)
-                """, (datos['claveProv'], datos['codigoBarras']))
-
-            self.conexion.commit()
-            messagebox.showinfo("Éxito", "Artículo creado correctamente")
-            self.mostrar_articulos()
-            self.limpiar_campos()
-
-        except mysql.connector.IntegrityError as e:
-            self.conexion.rollback()
-            if "Duplicate entry" in str(e):
-                messagebox.showerror("Error", "El código de barras ya existe")
-            elif "foreign key constraint fails" in str(e):
-                messagebox.showerror("Error", "La clave de proveedor no existe")
-            else:
-                messagebox.showerror("Error", f"Error de integridad: {str(e)}")
-        except Exception as e:
-            self.conexion.rollback()
-            messagebox.showerror("Error", f"No se pudo crear el artículo: {str(e)}")
-
-    def editar_articulo(self):
-        if not self.articulo_seleccionado:
-            messagebox.showerror("Error", "Seleccione un artículo primero")
-            return
-
-        datos = self.obtener_datos()
-
-        if not self.validar_datos(datos):
-            return
-
-        try:
-            self.cursor.execute("START TRANSACTION")
-
-            # Actualizar artículo
-            self.cursor.execute("""
-                UPDATE articulos SET
-                    codigoBarras = %s,
-                    nombreArt = %s,
-                    marca = %s,
-                    cantidadAlmacen = %s,
-                    precioUnit = %s,
-                    caducidad = %s
-                WHERE codigoBarras = %s
-            """, (
-                datos['codigoBarras'],
-                datos['nombreArt'],
-                datos['marca'],
-                datos['cantidadAlmacen'],
-                datos['precioUnit'],
-                datos['caducidad'] if datos['caducidad'] else None,
-                self.codigo_original
-            ))
-
-            # Actualizar relación con proveedor
-            if datos['claveProv']:
-                # Primero verificar si ya existe una relación
-                self.cursor.execute("""
-                    SELECT 1 FROM detalles 
-                    WHERE codigoBarras = %s
-                """, (self.codigo_original,))
-
-                if self.cursor.fetchone():
-                    # Actualizar relación existente
-                    self.cursor.execute("""
-                        UPDATE detalles SET
-                            claveProv = %s
-                        WHERE codigoBarras = %s
-                    """, (datos['claveProv'], self.codigo_original))
-                else:
-                    # Crear nueva relación
-                    self.cursor.execute("""
-                        INSERT INTO detalles (claveProv, codigoBarras)
-                        VALUES (%s, %s)
-                    """, (datos['claveProv'], self.codigo_original))
-
-            self.conexion.commit()
-            messagebox.showinfo("Éxito", "Artículo actualizado correctamente")
-            self.mostrar_articulos()
-            self.limpiar_campos()
-            self.articulo_seleccionado = None
-
-        except mysql.connector.IntegrityError as e:
-            self.conexion.rollback()
-            if "Duplicate entry" in str(e):
-                messagebox.showerror("Error", "El código de barras ya existe")
-            elif "foreign key constraint fails" in str(e):
-                messagebox.showerror("Error", "La clave de proveedor no existe")
-            else:
-                messagebox.showerror("Error", f"Error de integridad: {str(e)}")
-        except Exception as e:
-            self.conexion.rollback()
-            messagebox.showerror("Error", f"No se pudo actualizar: {str(e)}")
-
-    def borrar_articulo(self):
-        if not self.articulo_seleccionado:
-            messagebox.showerror("Error", "Seleccione un artículo primero")
-            return
-
-        if not messagebox.askyesno("Confirmar", "¿Borrar este artículo y sus relaciones?"):
-            return
-
-        try:
-            self.cursor.execute("START TRANSACTION")
-            codigo = self.articulo_seleccionado[0]
-
-            # Borrar primero las relaciones
-            self.cursor.execute("""
-                DELETE FROM detalles 
-                WHERE codigoBarras = %s
-            """, (codigo,))
-
-            # Luego borrar el artículo
-            self.cursor.execute("""
-                DELETE FROM articulos 
-                WHERE codigoBarras = %s
-            """, (codigo,))
-
-            self.conexion.commit()
-            messagebox.showinfo("Éxito", "Artículo borrado correctamente")
-            self.mostrar_articulos()
-            self.limpiar_campos()
-            self.articulo_seleccionado = None
-
-        except Exception as e:
-            self.conexion.rollback()
-            messagebox.showerror("Error", f"No se pudo borrar: {str(e)}")
-
-    def seleccionar_articulo(self, event):
-        seleccion = self.tabla.focus()
-        if seleccion:
-            valores = self.tabla.item(seleccion, "values")
-            self.articulo_seleccionado = valores
-            self.codigo_original = valores[0]  # Guardar código original para edición
-
-            # Mapear valores a campos
-            mapeo = {
-                'codigoBarras': 0,
-                'nombreArt': 1,
-                'marca': 2,
-                'cantidadAlmacen': 3,
-                'precioUnit': 4,
-                'caducidad': 5,
-                'claveProv': 6
-            }
-
-            for campo, idx in mapeo.items():
-                self.campos[campo].delete(0, tk.END)
-                if idx < len(valores):
-                    # Quitar el símbolo $ del precio si existe
-                    valor = valores[idx].replace("$", "") if idx == 4 else valores[idx]
-                    self.campos[campo].insert(0, valor)
+        return True
 
     def limpiar_campos(self):
         for campo in self.campos.values():
             campo.delete(0, tk.END)
+        self.articulo_seleccionado = None
+        self.codigo_original = None
+        self.modo_edicion = False
+        selection = self.tabla.selection()
+        if selection:
+            self.tabla.selection_remove(selection)
+
+    def crear_articulo(self):
+        datos = self.obtener_datos()
+        if not self.validar_datos(datos):
+            return
+        try:
+            self.cursor.execute("START TRANSACTION")
+            self.cursor.execute("""
+                INSERT INTO articulos (codigoBarras, nombreArt, marca, cantidadAlmacen, precioUnit, caducidad)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (datos['codigoBarras'], datos['nombreArt'], datos['marca'], datos['cantidadAlmacen'], datos['precioUnit'], datos['caducidad'] or None))
+            if datos['claveProv']:
+                self.cursor.execute("""
+                    SELECT 1 FROM detalles WHERE claveProv = %s AND codigoBarras = %s
+                """, (datos['claveProv'], datos['codigoBarras']))
+                if not self.cursor.fetchone():
+                    self.cursor.execute("""
+                        INSERT INTO detalles (claveProv, codigoBarras)
+                        VALUES (%s, %s)
+                    """, (datos['claveProv'], datos['codigoBarras']))
+            self.conexion.commit()
+            messagebox.showinfo("Éxito", "Artículo creado correctamente")
+            self.mostrar_articulos()
+            self.limpiar_campos()
+        except mysql.connector.IntegrityError as err:
+            self.conexion.rollback()
+            if err.errno == errorcode.ER_DUP_ENTRY:
+                messagebox.showerror("Error", "El código de barras ya existe")
+            elif err.errno == errorcode.ER_NO_REFERENCED_ROW_2:
+                messagebox.showerror("Error", "La clave de proveedor no existe")
+            else:
+                messagebox.showerror("Error", f"Error de integridad:\n{err}")
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"No se pudo crear el artículo:\n{err}")
+
+    def seleccionar_articulo(self, event):
+        selected = self.tabla.selection()
+        if selected:
+            item_id = selected[0]
+            item = self.tabla.item(item_id)
+            self.articulo_seleccionado = item['values']
+            self.codigo_original = item['values'][0]
+            self.modo_edicion = True
+
+            for campo in self.campos.values():
+                campo.delete(0, tk.END)
+
+            self.campos['codigoBarras'].insert(0, item['values'][0])
+            self.campos['nombreArt'].insert(0, item['values'][1])
+            self.campos['marca'].insert(0, item['values'][2])
+            self.campos['cantidadAlmacen'].insert(0, item['values'][3])
+            self.campos['precioUnit'].insert(0, item['values'][4].replace("$", ""))
+            self.campos['caducidad'].insert(0, item['values'][5])
+            self.campos['claveProv'].insert(0, item['values'][6])
+
+    def editar_articulo(self):
+        if not self.articulo_seleccionado:
+            messagebox.showwarning("Error", "Seleccione un artículo para editar")
+            return
+        datos = self.obtener_datos()
+        if not self.validar_datos(datos):
+            return
+        try:
+            self.cursor.execute("START TRANSACTION")
+            self.cursor.execute("""
+                UPDATE articulos SET codigoBarras=%s, nombreArt=%s, marca=%s,
+                cantidadAlmacen=%s, precioUnit=%s, caducidad=%s WHERE codigoBarras=%s
+            """, (datos['codigoBarras'], datos['nombreArt'], datos['marca'], datos['cantidadAlmacen'],
+                  datos['precioUnit'], datos['caducidad'] or None, self.codigo_original))
+            if datos['claveProv']:
+                self.cursor.execute("SELECT 1 FROM detalles WHERE codigoBarras = %s", (self.codigo_original,))
+                if self.cursor.fetchone():
+                    self.cursor.execute("UPDATE detalles SET claveProv = %s WHERE codigoBarras = %s",
+                                        (datos['claveProv'], self.codigo_original))
+                else:
+                    self.cursor.execute("INSERT INTO detalles (claveProv, codigoBarras) VALUES (%s, %s)",
+                                        (datos['claveProv'], self.codigo_original))
+            self.conexion.commit()
+            messagebox.showinfo("Éxito", "Artículo actualizado correctamente")
+            self.mostrar_articulos()
+            self.limpiar_campos()
+        except mysql.connector.IntegrityError as err:
+            self.conexion.rollback()
+            if err.errno == errorcode.ER_DUP_ENTRY:
+                messagebox.showerror("Error", "El código de barras ya existe")
+            elif err.errno == errorcode.ER_NO_REFERENCED_ROW_2:
+                messagebox.showerror("Error", "La clave de proveedor no existe")
+            else:
+                messagebox.showerror("Error", f"Error de integridad:\n{err}")
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"No se pudo actualizar el artículo:\n{err}")
+
+    def borrar_articulo(self):
+        if not self.articulo_seleccionado:
+            messagebox.showwarning("Error", "Seleccione un artículo para borrar")
+            return
+
+        confirmacion = messagebox.askyesno("Confirmar",
+                                           f"¿Está seguro que desea eliminar el artículo:\n{self.articulo_seleccionado[1]}?")
+        if not confirmacion:
+            return
+
+        try:
+            self.cursor.execute("START TRANSACTION")
+
+            # Primero, eliminamos el registro de la tabla detalles
+            self.cursor.execute("DELETE FROM detalles WHERE codigoBarras = %s", (self.codigo_original,))
+
+            # Luego, eliminamos el registro de la tabla articulos
+            self.cursor.execute("DELETE FROM articulos WHERE codigoBarras = %s", (self.codigo_original,))
+
+            self.conexion.commit()
+            messagebox.showinfo("Éxito", "Artículo eliminado correctamente")
+            self.mostrar_articulos()
+            self.limpiar_campos()
+        except mysql.connector.Error as err:
+            self.conexion.rollback()
+            messagebox.showerror("Error", f"No se pudo eliminar el artículo:\n{err}")
+
+    def limpiar_campos(self):
+        for campo in self.campos.values():
+            campo.delete(0, tk.END)
+        self.articulo_seleccionado = None
+        self.codigo_original = None
+        self.modo_edicion = False
+        selection = self.tabla.selection()
+        if selection:
+            self.tabla.selection_remove(selection)
 
     def __del__(self):
-        if hasattr(self, 'cursor'):
-            self.cursor.close()
+        if hasattr(self, 'cursor') and self.cursor:
+            try:
+                self.cursor.close()
+            except:
+                pass
         if hasattr(self, 'conexion'):
-            self.conexion.close()
-
+            try:
+                if self.conexion.is_connected():
+                    self.conexion.close()
+            except:
+                pass
 
