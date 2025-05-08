@@ -9,7 +9,23 @@ class ProveedoresApp:
         self.parent = parent
         self.main_root = main_root
         self.root = parent
-        self.root.configure(bg="#5bfcfe")
+        self.root.configure(bg="#f0f2f5")  # Fondo más claro y moderno
+
+        # Configuración de estilo general
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+
+        # Configurar estilos para los widgets
+        self.style.configure('TFrame', background="#f0f2f5")
+        self.style.configure('TLabel', background="#f0f2f5", font=('Segoe UI', 10))
+        self.style.configure('TButton', font=('Segoe UI', 10), relief="flat")
+        self.style.map('TButton',
+                       background=[('active', '#e1e5ea')],
+                       foreground=[('active', 'black')])
+
+        self.style.configure('Treeview', font=('Segoe UI', 10), rowheight=25)
+        self.style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+        self.style.map('Treeview', background=[('selected', '#4a98db')])
 
         # Variables de estado
         self.proveedor_seleccionado = None
@@ -19,7 +35,7 @@ class ProveedoresApp:
         self.conectar_db()
 
         # Configuración de la interfaz
-        self.configurar_interfaz()
+        self.crear_interfaz()
         self.crear_tablas()
         self.mostrar_proveedores()
 
@@ -37,91 +53,90 @@ class ProveedoresApp:
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {err}")
             raise
 
-    def configurar_interfaz(self):
-        """Configura los elementos de la interfaz gráfica"""
-        # Configuración del grid
-        for i in range(3):
-            self.root.grid_columnconfigure(i, weight=1 if i > 0 else 0)
+    def crear_interfaz(self):
+        self.root.grid_columnconfigure(1, weight=1)
         for i in range(7):
-            self.root.grid_rowconfigure(i, weight=1 if i == 6 else 0)
+            self.root.grid_rowconfigure(i, weight=0)
 
-        # Título
-        tk.Label(self.root, text="Proveedores", font=("Impact", 20, "bold"),
-                 bg="#5bfcfe").grid(row=0, column=0, columnspan=3, pady=20, sticky="n")
+        # Título con estilo moderno
+        title_frame = tk.Frame(self.root, bg="#2c3e50", height=80)
+        title_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 20))
+        title_frame.grid_columnconfigure(0, weight=1)
 
-        # Campos de entrada
+        tk.Label(title_frame, text="Proveedores", font=("Segoe UI", 24, "bold"),
+                 bg="#2c3e50", fg="white").grid(row=0, column=0, pady=20)
+
+        # Frame principal para los campos
+        form_frame = tk.Frame(self.root, bg="#f0f2f5", padx=20, pady=10)
+        form_frame.grid(row=1, column=0, columnspan=3, sticky="nsew")
+
         self.campos = {}
-        campos_config = [
-            ("Clave:", "claveProv", "", 12),
-            ("Teléfono:", "numTelProv", "", 10),
-            ("Empresa:", "empresa", "", 30),
-            ("Costos:", "costos", "", 10),
-            ("Cantidad comprada:", "cantidadEntregada", "", 10)
+        etiquetas = [
+            ("Clave:", "claveProv"),
+            ("Teléfono:", "numTelProv"),
+            ("Empresa:", "empresa"),
+            ("Costos:", "costos"),
+            ("Cantidad comprada:", "cantidadEntregada")
         ]
 
-        for i, (texto, nombre, show_char, maxlength) in enumerate(campos_config, 1):
-            tk.Label(self.root, text=texto, font=("Arial", 14), bg="#5bfcfe"
-                     ).grid(row=i, column=0, padx=10, pady=10, sticky="w")
+        for i, (texto, clave) in enumerate(etiquetas, 0):
+            tk.Label(form_frame, text=texto, font=("Segoe UI", 11),
+                     bg="#f0f2f5", fg="#2c3e50").grid(row=i, column=0, padx=10, pady=8, sticky="w")
+            entrada = tk.Entry(form_frame, font=("Segoe UI", 11),
+                               bg="white", bd=2, relief="groove", highlightthickness=0)
+            entrada.grid(row=i, column=1, padx=10, pady=8, sticky="ew")
+            self.campos[clave] = entrada
 
-            entry = tk.Entry(self.root, font=("Arial", 14), bg="#e6ffff",
-                             show=show_char, validate="key")
-            if maxlength:
-                entry['validatecommand'] = (entry.register(self.validar_longitud), '%P', maxlength)
-            entry.grid(row=i, column=2, padx=(0, 20), pady=10, sticky="ew")
-            self.campos[nombre] = entry
-
-        # Botones principales
-        self.crear_botones()
-
-        # Tabla de proveedores
-        self.configurar_tabla()
-
-    def validar_longitud(self, texto, maxlength):
-        """Valida que el texto no exceda la longitud máxima"""
-        return len(texto) <= int(maxlength)
-
-    def crear_botones(self):
-        """Crea los botones de la interfaz"""
-        frame_botones = tk.Frame(self.root, bg="#5bfcfe")
-        frame_botones.grid(row=7, column=0, columnspan=3, pady=20)
+        # Frame para botones principales
+        button_frame = tk.Frame(self.root, bg="#f0f2f5", pady=15)
+        button_frame.grid(row=2, column=0, columnspan=3, sticky="ew")
 
         botones = [
-            ("Añadir", "#A2E4B8", self.crear_proveedor),
-            ("Editar", "#FFE08A", self.editar_proveedor),
-            ("Borrar", "#F4A4A4", self.borrar_proveedor),
-            ("Limpiar", "#D3D3D3", self.limpiar_campos)
+            ("Añadir", "#27ae60", self.crear_proveedor),
+            ("Editar", "#f39c12", self.editar_proveedor),
+            ("Borrar", "#e74c3c", self.borrar_proveedor),
+            ("Limpiar", "#95a5a6", self.limpiar_campos)
         ]
 
-        for i, (texto, color, comando) in enumerate(botones):
-            tk.Button(frame_botones, text=texto, bg=color, font=("Arial", 12),
-                      command=comando).grid(row=0, column=i, padx=10, ipadx=10, ipady=5)
+        for idx, (texto, color, comando) in enumerate(botones):
+            btn = tk.Button(button_frame, text=texto, command=comando,
+                            bg=color, fg="white", font=("Segoe UI", 10, "bold"),
+                            activebackground=color, activeforeground="white",
+                            relief="flat", bd=0, padx=15, pady=8)
+            btn.grid(row=0, column=idx, padx=10, ipadx=5)
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=self.lighten_color(b.cget("bg"))))
+            btn.bind("<Leave>", lambda e, b=btn, c=color: b.config(bg=c))
 
-    def configurar_tabla(self):
-        """Configura la tabla de proveedores"""
-        frame_tabla = tk.Frame(self.root)
-        frame_tabla.grid(row=6, column=0, columnspan=3, sticky="nsew", padx=20, pady=(0, 20))
+        # Frame para la tabla
+        table_frame = tk.Frame(self.root, bg="#f0f2f5")
+        table_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=20, pady=(0, 20))
+        table_frame.grid_columnconfigure(0, weight=1)
+        table_frame.grid_rowconfigure(0, weight=1)
 
-        columnas = [
-            ("Clave", 90),
-            ("Teléfono", 100),
-            ("Empresa", 150),
-            ("Costos", 100),
-            ("Cantidad", 120)
-        ]
+        columnas = ["Clave", "Teléfono", "Empresa", "Costos", "Cantidad"]
+        self.tabla = ttk.Treeview(table_frame, columns=columnas,
+                                  show="headings", height=12, style="Treeview")
 
-        self.tabla = ttk.Treeview(frame_tabla, columns=[col[0] for col in columnas],
-                                  show="headings", height=12)
+        column_widths = {"Clave": 90, "Teléfono": 100, "Empresa": 150, "Costos": 100, "Cantidad": 120}
+        for col in columnas:
+            anchor = "center" if col in ["Costos", "Cantidad"] else "w"
+            self.tabla.heading(col, text=col, anchor=anchor)
+            self.tabla.column(col, width=column_widths.get(col, 100), anchor=anchor)
 
-        for col, width in columnas:
-            self.tabla.heading(col, text=col)
-            self.tabla.column(col, width=width, anchor=tk.CENTER if col in ["Costos", "Cantidad"] else tk.W)
-
-        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=self.tabla.yview)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tabla.yview)
         self.tabla.configure(yscrollcommand=scrollbar.set)
+
+        self.tabla.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
         self.tabla.bind("<<TreeviewSelect>>", self.seleccionar_proveedor)
 
-        self.tabla.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    def lighten_color(self, color, amount=0.2):
+        """Aclara un color hexadecimal"""
+        color = color.lstrip('#')
+        rgb = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+        lighter = tuple(min(255, int(c + (255 - c) * amount)) for c in rgb)
+        return f'#{lighter[0]:02x}{lighter[1]:02x}{lighter[2]:02x}'
 
     def crear_tablas(self):
         """Crea las tablas necesarias en la base de datos"""
@@ -255,11 +270,12 @@ class ProveedoresApp:
             self.proveedor_seleccionado = item['values']
             self.clave_original = item['values'][0]
 
-            # Limpiar y cargar datos en los campos
-            self.limpiar_campos()
+            # Cargar datos en los campos SIN llamar a limpiar_campos antes para evitar borrar el insertado
             for campo, valor in zip(self.campos.keys(), item['values']):
-                # Eliminar formato de dinero si es necesario
-                cleaned_val = valor.replace('$', '') if campo == 'costos' else valor
+                cleaned_val = valor
+                if campo == 'costos' and isinstance(valor, str):
+                    cleaned_val = valor.replace('$', '').replace(',', '')
+                self.campos[campo].delete(0, tk.END)
                 self.campos[campo].insert(0, cleaned_val)
 
     def editar_proveedor(self):
@@ -278,6 +294,24 @@ class ProveedoresApp:
         try:
             costos = float(datos['costos'] or 0)
             cantidad = int(datos['cantidadEntregada'] or 0)
+
+            # Verificar si los datos han cambiado; si no, no actualizar
+            self.cursor.execute("""
+                SELECT numTelProv, empresa, 
+                       (SELECT costos FROM detalles WHERE claveProv = %s) AS costos,
+                       (SELECT cantidadEntregada FROM detalles WHERE claveProv = %s) AS cantidadEntregada
+                FROM proveedores WHERE claveProv = %s
+            """, (self.clave_original, self.clave_original, self.clave_original))
+            proveedor_actual = self.cursor.fetchone()
+
+            # Comparar los datos actuales con los nuevos
+            if (datos['numTelProv'] == proveedor_actual['numTelProv'] and
+                    datos['empresa'] == proveedor_actual['empresa'] and
+                    costos == float(proveedor_actual['costos']) and
+                    cantidad == proveedor_actual['cantidadEntregada'] and
+                    datos['claveProv'] == self.clave_original):
+                messagebox.showinfo("Sin cambios", "No se realizaron cambios en los datos del proveedor.")
+                return
 
             self.cursor.execute("START TRANSACTION")
 
@@ -363,3 +397,4 @@ class ProveedoresApp:
             self.cursor.close()
         if hasattr(self, 'conexion') and self.conexion.is_connected():
             self.conexion.close()
+
